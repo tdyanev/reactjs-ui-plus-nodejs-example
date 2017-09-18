@@ -1,5 +1,6 @@
 const express = require('express');
 const app = express();
+const bodyParser = require('body-parser');
 
 const USERS = [
   {
@@ -25,12 +26,11 @@ const USERS = [
   },
 ];
 
+app.use(bodyParser.json());
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type');
-  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Content-Type', 'application/json');
   next();
 });
 
@@ -38,6 +38,12 @@ app.get('/api/users', (req, res) => {
   res.json(USERS);
 });
 
-//app.post('/login')
+//FIXME must be POST method
+app.get('/login', (req, res) => {
+  var username = req.query.username;
+  var password = req.query.password;
+
+  res.send({ success: USERS.some(user => user.username === username && user.password === password) });
+});
 
 app.listen(3001);
