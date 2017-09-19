@@ -2,41 +2,28 @@ import React from 'react'
 import {
   BrowserRouter as Router,
   Route,
-  Link,
   Redirect,
   withRouter
 } from 'react-router-dom'
 
-var isLogged = false;
+var isLogged = 0;
+
+const server = 'http://localhost:3001';
 
 const App = () => (
   <Router>
     <div>
-      <LoginFromWithRouter redirect="/panel" />
-      <PrivateRoute path="/panel" component={Panel}/>
+      <Route exact path="/" component={LoginFromWithRouter} />
+      <PrivateRoute path="/panel" component={Panel} itemsPerPage="4" />
     </div>
   </Router>
-)
-
-const server = 'http://localhost:3001';
-
-const fakeAuth = {
-  isAuthenticated: false,
-  authenticate(cb) {
-    this.isAuthenticated = true
-    setTimeout(cb, 100) // fake async
-  },
-  signout(cb) {
-    this.isAuthenticated = false
-    setTimeout(cb, 100)
-  }
-}
+);
 
 class LoginForm extends React.Component {
   constructor(props) {
     super(props);
 
-    this.state = { redirect: false };
+    this.state = { redirect: false, message: '', };
     this.handleSubmit = this.handleSubmit.bind(this);
   }
 
@@ -49,10 +36,13 @@ class LoginForm extends React.Component {
       .then(res => {
         if (res.success) {
           isLogged = true;
-          this.setState({ redirect: true });
+          this.setState({ redirect: true, message: 'Success!' });
+        } else {
+          this.setState({
+            message: 'Wrong credentials! Check out USERS in src/server/index.js',
+          });
         }
       });
-
 
     /*
     fetch(server + '/login', {
@@ -67,11 +57,10 @@ class LoginForm extends React.Component {
     */
   }
 
-
   render() {
     if (this.state.redirect) {
       return (
-        <Redirect to={this.props.redirect} />
+        <Redirect to="/panel" />
       )
     }
 
@@ -79,8 +68,10 @@ class LoginForm extends React.Component {
       <div>
         <h1>Login</h1>
         <input type="text" placeholder="username" ref={ input => this.username = input } />
-        <input type="password" ref={ input => this.password = input }/>
+        <input type="password" placeholder="password" ref={ input => this.password = input }/>
         <button onClick={this.handleSubmit}>Log in</button>
+
+        <p>{this.state.message}</p>
       </div>
 
     )
@@ -90,23 +81,10 @@ class LoginForm extends React.Component {
 
 const LoginFromWithRouter = withRouter(LoginForm);
 
-/*
-const LoginForm = withRouter(({ history }) => (
-  fakeAuth.isAuthenticated ? (
-    <p>
-      Welcome! <button onClick={() => {
-        fakeAuth.signout(() => history.push('/'))
-      }}>Sign out</button>
-    </p>
-  ) : (
-  )
-))
-*/
-
 const PrivateRoute = ({ component: Component, ...rest }) => (
   <Route {...rest} render={props => (
-    fakeAuth.isAuthenticated ? (
-      <Component {...props}/>
+    isLogged ? (
+      <Panel itemsPerPage={3} />
     ) : (
       <Redirect to={{
         pathname: '/',
@@ -116,37 +94,273 @@ const PrivateRoute = ({ component: Component, ...rest }) => (
   )}/>
 )
 
-const Public = () => <h3>Public</h3>
-const Panel = () => <h3>Panel</h3>
+class Panel extends React.Component {
+  constructor(props) {
+    super(props);
 
-class Login extends React.Component {
-  state = {
-    redirectToReferrer: false
+    this.handleFilter = this.handleFilter.bind(this);
+    this.onUpdate = this.onUpdate.bind(this);
+    this.onPageChange = this.onPageChange.bind(this);
+    this.state = {
+      data: [],
+      response: [],
+      totalPages: 0,
+    };
   }
 
-  login = () => {
-    fakeAuth.authenticate(() => {
-      this.setState({ redirectToReferrer: true })
-    })
+  componentDidMount() {
+    fetch(server + '/api/users')
+      .then(res => res.json())
+      .then(response => {
+        let data = response.slice(0, this.props.itemsPerPage);
+
+        this.setState({
+          data: data,
+          filterData: false,
+          response: response,
+          totalPages: Math.ceil(response.length / this.props.itemsPerPage) - 1,
+        });
+      });
+  }
+
+  handleFilter(column, string) {
+    var collection = this.state.data.filter(row =>
+      // lets make it case insensitive
+
+      row[column].toLowerCase().includes(string.toLowerCase()));
+
+    this.setState({
+      filterData: collection,
+    });
+  }
+
+  onUpdate(id, data) {
+    const newResponse = this.state.response.slice();
+
+    // not good in general but works fine in this example
+    const row = newResponse[id - 1];
+
+    row.firstName = data.firstName;
+    row.lastName = data.lastName;
+
+    this.setState({
+      response: newResponse,
+    });
+  }
+
+  onPageChange(newPage) {
+    let index = newPage * this.props.itemsPerPage;
+    let data = this.state.response.slice(index, index + this.props.itemsPerPage);
+
+    this.setState({
+      data: data,
+      filterData: false,
+    });
   }
 
   render() {
-    const { from } = this.props.location.state || { from: { pathname: '/' } }
-    const { redirectToReferrer } = this.state
-
-    if (redirectToReferrer) {
-      return (
-        <Redirect to={from}/>
-      )
-    }
 
     return (
-      <div>
-        <p>You must log in to view the page at {from.pathname}</p>
-        <button onClick={this.login}>Log in</button>
+      <div className="Panel">
+        <table>
+          <thead>
+            <tr>
+            <td><Filter label="#" column="id" onFilter={this.handleFilter} /></td>
+            <td><Filter label="UserName" column="userName" onFilter={this.handleFilter} /></td>
+            <td><Filter label="FirstName" column="firstName" onFilter={this.handleFilter} /></td>
+            <td><Filter label="LastName" column="lastName" onFilter={this.handleFilter} /></td>
+            <td>Actions</td>
+            </tr>
+          </thead>
+          <UserData data={this.state.filterData || this.state.data} onUpdate={this.onUpdate} />
+        </table>
+
+        <PageNavigation current={0} total={this.state.totalPages} onChange={this.onPageChange} />
       </div>
     )
   }
+}
+
+class PageNavigation extends React.Component {
+  constructor(props) {
+    super(props);
+
+    this.state = {
+      current: props.current,
+    };
+
+    this.forward = this.forward.bind(this);
+    this.backward = this.backward.bind(this);
+  }
+
+  shift(step) {
+    const newCurrent = this.state.current + step;
+    this.props.onChange(newCurrent);
+    this.setState({
+      current: newCurrent,
+    });
+  }
+
+  forward() {
+    this.shift(1);
+  }
+
+  backward() {
+    this.shift(-1);
+  }
+
+  render() {
+    var buttons = [];
+
+    if (this.state.current > 0) {
+      buttons.push(
+        <button key="0" onClick={this.backward}>Previous</button>
+      )
+    }
+    if (this.state.current < this.props.total) {
+      buttons.push(
+        <button key="1" onClick={this.forward}>Next</button>
+      )
+    }
+    return (
+      <div>
+      {buttons}
+      </div>
+
+    )
+
+  }
+}
+
+
+class Filter extends React.Component {
+  constructor(props) {
+    super(props);
+
+    this.handleFilter = this.handleFilter.bind(this);
+  }
+
+  handleFilter(e) {
+    this.props.onFilter(this.props.column, e.target.value);
+  }
+
+  render() {
+    return (
+      <div>
+        <input type="text" placeholder={`filter by ${this.props.label}`} onChange={this.handleFilter} />
+      </div>
+    )
+  }
+}
+
+
+class UserData extends React.Component {
+  render() {
+
+    let rows = this.props.data.reduce((acc, row, key) =>
+        acc.concat(<RowUserData key={key} data={row} onUpdate={this.props.onUpdate} />), []);
+
+    return (
+      <tbody>
+
+      {rows}
+
+      </tbody>
+    )
+  }
+}
+
+class RowUserData extends React.Component {
+  constructor(props) {
+    super(props);
+
+
+    this.state = {
+      editing: false,
+      lastName: props.data.lastName,
+      firstName: props.data.firstName,
+    };
+
+    this.save = this.save.bind(this);
+    this.cancel = this.cancel.bind(this);
+    this.edit = this.edit.bind(this);
+    this.handleFirstName = this.handleFirstName.bind(this);
+    this.handleLastName = this.handleLastName.bind(this);
+  }
+
+  save() {
+    this.setState({
+      editing: false,
+    });
+
+    this.props.onUpdate(this.props.data.id, {
+      firstName: this.state.firstName,
+      lastName: this.state.lastName,
+    });
+
+    // update the record
+    // send it to the server
+    // won't do this right now
+    // fetch(....)
+  }
+
+  handleFirstName(e) {
+    this.setState({
+      firstName: e.target.value,
+    });
+  }
+
+  handleLastName(e) {
+    this.setState({
+      lastName: e.target.value,
+    });
+  }
+
+  edit() {
+    this.setState({
+      editing: true,
+    });
+  }
+
+  cancel() {
+    this.setState({
+      editing: false,
+      lastName: this.props.data.lastName,
+      firstName: this.props.data.firstName,
+    });
+  }
+
+  render() {
+    return (
+
+        this.state.editing ?
+
+             <tr>
+               <td>{this.props.data.id}</td>
+               <td>{this.props.data.userName}</td>
+               <td><input type="text" value={this.state.firstName} onChange={this.handleFirstName} /></td>
+               <td><input type="text" value={this.state.lastName} onChange={this.handleLastName} /></td>
+               <td>
+               <button onClick={this.save}>Save</button>
+               <button onClick={this.cancel}>Cancel</button>
+               </td>
+             </tr>
+
+         :
+             <tr>
+               <td>{this.props.data.id}</td>
+               <td>{this.props.data.userName}</td>
+               <td>{this.props.data.firstName}</td>
+               <td>{this.props.data.lastName}</td>
+               <td>
+               <button onClick={this.edit}>Edit</button>
+               </td>
+             </tr>
+
+
+    )
+  }
+
 }
 
 export default App;
